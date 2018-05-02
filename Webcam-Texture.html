@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<title>Webcam Texture (Three.js)</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<link rel=stylesheet href="css/base.css"/>
+</head>
+<body>
+
+<p id="errorMessage"></p>
+
+<video id="monitor" autoplay width="160" height="120" style="visibility: hidden; float:left;"></video>
+<canvas id="videoImage" width="160" height="120" style="visibility: hidden; float:left;"></canvas>
+
+<script>
+navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+window.URL = window.URL || window.webkitURL;
+
+var camvideo = document.getElementById('monitor');
+
+	if (!navigator.getUserMedia)
+	{
+		document.getElementById('errorMessage').innerHTML =
+			'Sorry. <code>navigator.getUserMedia()</code> is not available.';
+	} else {
+		navigator.getUserMedia({video: true}, gotStream, noStream);
+	}
+
+function gotStream(stream)
+{
+	if (window.URL)
+	{   camvideo.src = window.URL.createObjectURL(stream);   }
+	else // Opera
+	{   camvideo.src = stream;   }
+
+	camvideo.onerror = function(e)
+	{   stream.stop();   };
+
+	stream.onended = noStream;
+}
+
+function noStream(e)
+{
+	var msg = 'No camera available.';
+	if (e.code == 1)
+	{   msg = 'User denied access to use camera.';   }
+	document.getElementById('errorMessage').textContent = msg;
+}
+</script>
+
+<script src="js/Three.js"></script>
+<script src="../three.js"></script>
+<script src="../js/physi.js"></script>
+<script src="../libs/dat.gui.min.js"></script>
+<script src="../loaders/OBJLoader.js"></script>
+<script src="../loaders/MTLLoader.js"></script>
+<script src="js/Detector.js"></script>
+<script src="js/Stats.js"></script>
+<script src="js/OrbitControls.js"></script>
+<script src="js/THREEx.KeyboardState.js"></script>
+<script src="js/THREEx.FullScreen.js"></script>
+<script src="js/THREEx.WindowResize.js"></script>
+
+<!-- jQuery code to display an information button and box when clicked. -->
+<script src="js/jquery-1.9.1.js"></script>
+<script src="js/jquery-ui.js"></script>
+<link rel=stylesheet href="css/jquery-ui.css" />
+<link rel=stylesheet href="css/info.css"/>
+</div>
+<!-- ------------------------------------------------------------ -->
+
+<div id="ThreeJS" style="position: absolute; left:0px; top:0px"></div>
+<script>
+/*
+	Three.js "tutorials by example"
+	Author: Lee Stemkoski
+	Date: July 2013 (three.js v59dev)
+*/
+
+// MAIN
+
+// standard global variables
+var container, scene, camera, renderer, controls, stats;
+var avatar, avatarCam;
+var clock;
+var keyboard = new THREEx.KeyboardState();
+var keyControls =
+		 {fwd:false, bwd:false, left:false, right:false, up:false,
+			speed:50, fly:false, reset:false}
+
+// custom global variables
+var video, videoImage, videoImageContext, videoTexture, movieScreen, cube, animator, mirrorCube, mirrorCubeCamera, tree; // for mirror material
+
+init();
+initControls();
+animate();
+
+// FUNCTIONS
+function init(){
+		initPhysijs();
+		scene = initScene();
+		initRenderer();
+		createMainScene();
+}
+
+function createMainScene(){
+	// CAMERA
+	var SCREEN_WIDTH = window.innerWidth, SCREEN_HEIGHT = window.innerHeight;
+	var VIEW_ANGLE = 45, ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT, NEAR = 0.1, FAR = 20000;
+	camera = new THREE.PerspectiveCamera( VIEW_ANGLE, ASPECT, NEAR, FAR);
+	scene.add(camera);
+	camera.position.set(0,150,400);
+	camera.lookAt(scene.position);
+	// RENDERER
+	if ( Detector.webgl )
+		renderer = new THREE.WebGLRenderer( {antialias:true} );
+	else
+		renderer = new THREE.CanvasRenderer();
+	renderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+	container = document.getElementById( 'ThreeJS' );
+	container.appendChild( renderer.domElement );
+	// CONTROLS
+	controls = new THREE.OrbitControls( camera, renderer.domElement );
+	// EVENTS
+	THREEx.WindowResize(renderer, camera);
+	THREEx.FullScreen.bindKey({ charCode : 'm'.charCodeAt(0) });
+	// STATS
+	stats = new Stats();
+	stats.domElement.style.position = 'absolute';
+	stats.domElement.style.bottom = '0px';
+	stats.domElement.style.zIndex = 100;
+	container.appendChild( stats.domElement );
+	// LIGHT
+	var light = new THREE.AmbientLight(0xffffff);
+	light.position.set(0,250,0);
+	light.intensity = 0.75;
+	scene.add(light);
+	// FLOOR
+	// var floorTexture = new THREE.ImageUtils.loadTexture( 'images/checkerboard.jpg' );
+	// floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+	// floorTexture.repeat.set( 10, 10 );
+	// var floorMaterial = new THREE.MeshBasicMaterial( { map: floorTexture, side: THREE.DoubleSide } );
+	// var floorGeometry = new THREE.boxGeometry(1000, 1000, 10);
+	var floor = createAnimatedGround('images/watermove.gif');
+	floor.position.y = -1;
+	floor.rotation.x = Math.PI / 2;
+	scene.add(floor);
+
+	var sandFloor = createGround('images/sandBeach.jpg');
+	sandFloor.position.y = -0.5;
+	sandFloor.rotation.x = Math.PI / 2;
+	scene.add(sandFloor);
+	// SKYBOX/FOG
+	scene.fog = new THREE.FogExp2( 0x9999ff, 0.00025 );
+	//Tree
+
+	var mtlLoader = new THREE.MTLLoader();
+	mtlLoader.load('models/tree.mtl', function (materials) {
+
+  materials.preload();
+
+    var objLoader = new THREE.OBJLoader();
+    objLoader.setMaterials(materials);
+    objLoader.load('models/tree.obj', function (object) {
+				object.scale.set(10,10,10)
+        scene.add(object);
+        object.position.set(100,0,50);
+
+    });
+	});
+	//SKYBOX
+	var imagePrefix = "images/dawnmountain-";
+	var directions  = ["xpos", "xneg", "ypos", "yneg", "zpos", "zneg"];
+	var imageSuffix = ".png";
+	var skyGeometry = new THREE.CubeGeometry( 5000, 5000, 5000 );
+
+	var materialArray = [];
+	for (var i = 0; i < 6; i++)
+		materialArray.push( new THREE.MeshBasicMaterial({
+			map: THREE.ImageUtils.loadTexture( imagePrefix + directions[i] + imageSuffix ),
+			side: THREE.BackSide
+		}));
+	var skyMaterial = new THREE.MeshFaceMaterial( materialArray );
+	var skyBox = new THREE.Mesh( skyGeometry, skyMaterial );
+	scene.add( skyBox );
+
+	//Mirror
+	var cubeGeom = new THREE.SphereGeometry( 50, 32, 16 );
+	mirrorCubeCamera = new THREE.CubeCamera( 0.1, 5000, 512 );
+	// mirrorCubeCamera.renderTarget.minFilter = THREE.LinearMipMapLinearFilter;
+	scene.add( mirrorCubeCamera );
+	var mirrorCubeMaterial = new THREE.MeshBasicMaterial( { envMap: mirrorCubeCamera.renderTarget } );
+	mirrorCube = new THREE.Mesh( cubeGeom, mirrorCubeMaterial );
+	mirrorCube.position.set(-75,100,0);
+	mirrorCubeCamera.position = mirrorCube.position;
+	scene.add(mirrorCube);
+	///////////
+	// VIDEO //
+	///////////
+
+	video = document.getElementById( 'monitor' );
+
+	videoImage = document.getElementById( 'videoImage' );
+	videoImageContext = videoImage.getContext( '2d' );
+	// background color if no video present
+	videoImageContext.fillStyle = '#000000';
+	videoImageContext.fillRect( 0, 0, videoImage.width, videoImage.height );
+
+	videoTexture = new THREE.Texture( videoImage );
+	videoTexture.minFilter = THREE.LinearFilter;
+	videoTexture.magFilter = THREE.LinearFilter;
+
+	var movieMaterial = new THREE.MeshBasicMaterial( { map: videoTexture, overdraw: true, side:THREE.DoubleSide } );
+	// the geometry on which the movie will be displayed;
+	// 		movie image will be scaled to fit these dimensions.
+	var movieGeometry = new THREE.PlaneGeometry( 100, 100, 1, 1 );
+	var movieScreen = new THREE.Mesh( movieGeometry, movieMaterial );
+	// movieScreen.position.set(0,50,0);
+	// scene.add(movieScreen);
+	avatar = createAvatar();
+	scene.add(avatar);
+
+
+	avatar.position.set(0,26,0);
+
+	camera.position.set(0,150,300);
+	camera.lookAt(avatar.position);
+
+
+}
+
+function initScene(){
+	//scene = new THREE.Scene();
+	var scene = new Physijs.Scene();
+	return scene;
+}
+
+function initPhysijs(){
+	Physijs.scripts.worker = '/js/physijs_worker.js';
+	Physijs.scripts.ammo = '/js/ammo.js';
+}
+
+function initRenderer(){
+	renderer = new THREE.WebGLRenderer();
+	renderer.setSize( window.innerWidth, window.innerHeight-50 );
+	document.body.appendChild( renderer.domElement );
+	renderer.shadowMap.enabled = true;
+	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+}
+
+function createAvatar(){
+	//ar geometry = new THREE.SphereGeometry( 4, 20, 20);
+	var geometry = new THREE.BoxGeometry( 50, 50, 50);
+	var material = new THREE.MeshBasicMaterial( { map: videoTexture, overdraw: true, side:THREE.DoubleSide } );
+	var pmaterial = new Physijs.createMaterial(material,0.9,0.5);
+	//var mesh = new THREE.Mesh( geometry, material );
+	var mesh = new Physijs.BoxMesh( geometry, material );
+	mesh.setDamping(0.1,0.1);
+	mesh.castShadow = true;
+	var scoop1 = createBoxMesh2(0xff0000,10,1,0.1);
+	var scoop2 = createBoxMesh2(0xff0000,10,1,0.1);
+	scoop1.position.set(0,-2,5);
+	scoop2.position.set(0,-3,5);
+	//scoop1.rotation.set(0,Math.PI/6);
+	scoop2.rotation.set(0,-Math.PI/6);
+	mesh.add(scoop1);
+	//mesh.add(scoop2);
+
+	return mesh;
+}
+
+function createGround(image){
+	// creating a textured plane which receives shadows
+	var geometry = new THREE.PlaneGeometry( 1000, 1000, 10 );
+	var texture = new THREE.TextureLoader().load( image );
+	texture.wrapS = THREE.RepeatWrapping;
+	texture.wrapT = THREE.RepeatWrapping;
+	texture.repeat.set( 15, 15 );
+	var material = new THREE.MeshLambertMaterial( { color: 0xffffff,  map: texture ,side:THREE.DoubleSide} );
+	var pmaterial = new Physijs.createMaterial(material,0.9,0.05);
+	//var mesh = new THREE.Mesh( geometry, material );
+	var mesh = new Physijs.BoxMesh( geometry, pmaterial, 0 );
+
+	mesh.receiveShadow = true;
+
+	mesh.rotateX(Math.PI/2);
+	return mesh
+	// we need to rotate the mesh 90 degrees to make it horizontal not vertical
+}
+
+function createAnimatedGround(image){
+
+	var animTexture = new THREE.ImageUtils.loadTexture( image );
+	animator = new TextureAnimator( animTexture, 10, 1, 10, 75 ); // texture, #horiz, #vert, #total, duration.
+	var runnerMaterial = new THREE.MeshBasicMaterial( { map: animTexture, side:THREE.DoubleSide } );
+	// creating a textured plane which receives shadows
+	var geometry = new THREE.PlaneGeometry( 5000, 5000, 10 );
+	animTexture.wrapS = THREE.RepeatWrapping;
+	animTexture.wrapT = THREE.RepeatWrapping;
+	animTexture.repeat.set( 45, 45 );
+	var material = new THREE.MeshLambertMaterial( { color: 0xffffff,  map: animTexture ,side:THREE.DoubleSide} );
+	var pmaterial = new Physijs.createMaterial(material,0.9,0.05);
+	//var mesh = new THREE.Mesh( geometry, material );
+	var mesh = new Physijs.BoxMesh( geometry, pmaterial, 0 );
+
+	mesh.receiveShadow = true;
+
+	mesh.rotateX(Math.PI/2);
+	return mesh
+	// we need to rotate the mesh 90 degrees to make it horizontal not vertical
+}
+
+
+function createBoxMesh2(color,w,h,d){
+	var geometry = new THREE.BoxGeometry( w, h, d);
+	var material = new THREE.MeshLambertMaterial( { color: color} );
+	mesh = new Physijs.BoxMesh( geometry, material );
+	//mesh = new Physijs.BoxMesh( geometry, material,0 );
+	mesh.castShadow = true;
+	return mesh;
+}
+
+function animate()
+{
+    requestAnimationFrame( animate );
+		update();
+		updateAvatar();
+		scene.simulate();
+		render();
+}
+
+function initControls(){
+	// here is where we create the eventListeners to respond to operations
+
+		//create a clock for the time-based animation ...
+		clock = new THREE.Clock();
+		clock.start();
+
+		window.addEventListener( 'keydown', keydown);
+		window.addEventListener( 'keyup',   keyup );
+}
+
+function keydown(event){
+	// this is the regular scene
+	switch (event.key){
+		// change the way the avatar is moving
+		case "w": keyControls.fwd = true;  break;
+		case "s": keyControls.bwd = true; break;
+		case "a": keyControls.left = true; break;
+		case "d": keyControls.right = true; break;
+
+	}
+
+}
+
+function keyup(event){
+	//console.log("Keydown:"+event.key);
+	//console.dir(event);
+	switch (event.key){
+		case "w": keyControls.fwd   = false;  break;
+		case "s": keyControls.bwd   = false; break;
+		case "a": keyControls.left  = false; break;
+		case "d": keyControls.right = false; break;
+	}
+}
+
+function TextureAnimator(texture, tilesHoriz, tilesVert, numTiles, tileDispDuration)
+{
+	// note: texture passed by reference, will be updated by the update function.
+
+	this.tilesHorizontal = tilesHoriz;
+	this.tilesVertical = tilesVert;
+	// how many images does this spritesheet contain?
+	//  usually equals tilesHoriz * tilesVert, but not necessarily,
+	//  if there at blank tiles at the bottom of the spritesheet.
+	this.numberOfTiles = numTiles;
+	texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+	texture.repeat.set( 1 / this.tilesHorizontal, 1 / this.tilesVertical );
+
+	// how long should each image be displayed?
+	this.tileDisplayDuration = tileDispDuration;
+
+	// how long has the current image been displayed?
+	this.currentDisplayTime = 0;
+
+	// which image is currently being displayed?
+	this.currentTile = 0;
+
+	this.update = function( milliSec )
+	{
+		this.currentDisplayTime += milliSec;
+		while (this.currentDisplayTime > this.tileDisplayDuration)
+		{
+			this.currentDisplayTime -= this.tileDisplayDuration;
+			this.currentTile++;
+			if (this.currentTile == this.numberOfTiles)
+				this.currentTile = 0;
+			var currentColumn = this.currentTile % this.tilesHorizontal;
+			texture.offset.x = currentColumn / this.tilesHorizontal;
+			var currentRow = Math.floor( this.currentTile / this.tilesHorizontal );
+			texture.offset.y = currentRow / this.tilesVertical;
+		}
+	};
+}
+
+
+function updateAvatar(){
+	"change the avatar's linear or angular velocity based on controls state (set by WSAD key presses)"
+
+	var forward = avatar.getWorldDirection();
+
+	if (keyControls.fwd){
+		avatar.setLinearVelocity(forward.multiplyScalar(keyControls.speed));
+	} else if (keyControls.bwd){
+		avatar.setLinearVelocity(forward.multiplyScalar(-keyControls.speed));
+	} else {
+		var velocity = avatar.getLinearVelocity();
+		velocity.x=velocity.z=velocity.y=0;
+		avatar.setLinearVelocity(velocity); //stop the xz motion
+	}
+
+
+	if (keyControls.left){
+		avatar.setAngularVelocity(new THREE.Vector3(0,keyControls.speed*0.1,0));
+	} else if (keyControls.right){
+		avatar.setAngularVelocity(new THREE.Vector3(0,-keyControls.speed*0.1,0));
+	} else {
+		avatar.setAngularVelocity(new THREE.Vector3(0,0,0));
+	}
+
+
+}
+
+function update()
+{
+	var delta = clock.getDelta();
+	animator.update(500 * delta);
+	if ( keyboard.pressed("p") ) // pause
+		video.pause();
+	if ( keyboard.pressed("r") ) // resume
+		video.play();
+	controls.update();
+	stats.update();
+}
+
+function render()
+{
+	if ( video.readyState === video.HAVE_ENOUGH_DATA )
+	{
+		videoImageContext.drawImage( video, 0, 0, videoImage.width, videoImage.height );
+		if ( videoTexture )
+			videoTexture.needsUpdate = true;
+	}
+	mirrorCubeCamera.updateCubeMap( renderer, scene );
+	renderer.render( scene, camera );
+}
+
+</script>
+
+</body>
+</html>
